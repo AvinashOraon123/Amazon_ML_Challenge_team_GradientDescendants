@@ -343,9 +343,109 @@ class _QueryTexts:
         return blocking.part_texts(*(c[col].tolist() for col in TEXT_COLS))
 
 
-def candidate_files(split: str) -> list[str]:
-    return [f"candidates/{split}/{_safe(c)}.parquet" for c in countries(split)
-            if io.exists(f"candidates/{split}/{_safe(c)}.parquet")]
+def candidate_files(split: str, pruned: bool | None = None) -> list[str]:
+    """Candidate files per country block: the raw retrieval output, or (default when pruning is on)
+    the pruned survivors that the matcher actually scores."""
+    pruned = bool(C.PRUNE_Q) if pruned is None else pruned
+    d = "pruned" if pruned else "candidates"
+    return [f"{d}/{split}/{_safe(c)}.parquet" for c in countries(split)
+            if io.exists(f"{d}/{split}/{_safe(c)}.parquet")]
+
+
+# --------------------------------------------------------------------------------------
+# Stage 2b: learned candidate pruning (cascade)
+# --------------------------------------------------------------------------------------
+PRUNER_REL = "model/pruner.txt"
+
+
+def _pruner_rows(split: str, stats: dict, keep_s1: np.ndarray, keys: np.ndarray, n1: int):
+    """Cheap features + labels for all retrieved pairs of the selected S1 entities."""
+    X, y = [], []
+    for rel in candidate_files(split, pruned=False):
+        for batch in pq.ParquetFile(io.fetch(rel)).iter_batches(batch_size=2_000_000):
+            b = batch.to_pandas()
+            b = b[keep_s1[b["s1_idx"].to_numpy()]]
+            if not len(b):
+                continue
+            si, ri = b["s1_idx"].to_numpy(), b["r_idx"].to_numpy()
+            f = features.retrieval_features(si, ri, b["ret"].to_numpy(), b["ret_nm"].to_numpy(), b["rk"].to_numpy(), stats)
+            X.append(pd.DataFrame(f).astype(np.float32))
+            y.append(isin_sorted(ri.astype(np.int64) * n1 + si, keys).astype(np.int8))
+    return pd.concat(X, ignore_index=True), np.concatenate(y)
+
+
+def train_pruner(force: bool = False):
+    """Fit the pruner on a slice of TRAIN-role entities (never on validation entities)."""
+    import lightgbm as lgb
+
+    if io.exists(PRUNER_REL) and not force:
+        return lgb.Booster(model_file=str(io.fetch(PRUNER_REL)))
+    stats = dict(np.load(io.fetch("candidates/train_stats.npz")))
+    s1_ids, _ = entity_ids("train")
+    role = entity_roles(s1_ids)
+    h = pd.util.hash_pandas_object(s1_ids.astype(str) + "#pruner", index=False).to_numpy()
+    keep = (role == 1) & ((h % np.uint64(10_000)).astype(np.float64) / 100.0 < C.PRUNER_TRAIN_PCT * 100 / max(C.train_valid_pct()[0], 1e-9))
+    keys, n1 = true_pair_keys("train")
+    t = time.time()
+    X, y = _pruner_rows("train", stats, keep, keys, n1)
+    print(f"  pruner data: {len(X):,} pairs of {int(keep.sum()):,} entities, positives {int(y.sum()):,} ({time.time() - t:.0f}s)")
+    d = lgb.Dataset(X.to_numpy(np.float32), y, feature_name=list(X.columns))
+    m = lgb.train({"objective": "binary", "learning_rate": 0.1, "num_leaves": 63, "min_child_samples": 200,
+                   "feature_fraction": 0.9, "verbose": -1, "num_threads": C.N_JOBS}, d, 300)
+    p = io.ckpt_path(PRUNER_REL)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    m.save_model(str(p))
+    io.save_file(p, PRUNER_REL, force=True)
+    print(f"  pruner trained ({time.time() - t:.0f}s)")
+    return m
+
+
+def run_prune(split: str, force: bool = False) -> dict:
+    """Score every retrieved pair with the pruner and keep q >= PRUNE_Q -> pruned/{split}/{country}.parquet."""
+    pruner = train_pruner()
+    stats = dict(np.load(io.fetch(f"candidates/{split}_stats.npz")))
+    feats = pruner.feature_name()
+    summary = {"retrieved": 0, "kept": 0}
+    for rel in candidate_files(split, pruned=False):
+        out_rel = rel.replace("candidates/", "pruned/", 1)
+        if io.exists(out_rel) and not force:
+            n_in = pq.ParquetFile(io.fetch(rel)).metadata.num_rows
+            n_out = pq.ParquetFile(io.fetch(out_rel)).metadata.num_rows
+            summary["retrieved"] += n_in
+            summary["kept"] += n_out
+            print(f"  [skip] {out_rel} exists ({n_out:,} of {n_in:,} pairs)")
+            continue
+        t = time.time()
+        p = io.ckpt_path(out_rel)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".tmp")
+        writer, n_in, n_out = None, 0, 0
+        pf = pq.ParquetFile(io.fetch(rel))
+        for k, batch in enumerate(pf.iter_batches(batch_size=2_000_000)):
+            b = batch.to_pandas()
+            si, ri = b["s1_idx"].to_numpy(), b["r_idx"].to_numpy()
+            f = features.retrieval_features(si, ri, b["ret"].to_numpy(), b["ret_nm"].to_numpy(), b["rk"].to_numpy(), stats)
+            q = pruner.predict(pd.DataFrame(f)[feats].to_numpy(np.float32), num_threads=C.N_JOBS)
+            keep = q >= C.PRUNE_Q
+            out = b[keep].assign(q=q[keep].astype(np.float32))
+            tbl = pa.Table.from_pandas(out, preserve_index=False)
+            if writer is None:
+                writer = pq.ParquetWriter(tmp, tbl.schema, compression="zstd")
+            writer.write_table(tbl)
+            n_in += len(b)
+            n_out += int(keep.sum())
+            progress(f"pruning {split}/{rel.rsplit('/', 1)[-1]}", (k + 1) * 2_000_000, pf.metadata.num_rows, f"kept {n_out:,}")
+        writer.close()
+        tmp.replace(p)
+        io.save_file(p, out_rel)
+        summary["retrieved"] += n_in
+        summary["kept"] += n_out
+        print(f"  {rel}: kept {n_out:,} of {n_in:,} pairs ({n_out / max(1, n_in):.1%}) in {time.time() - t:.0f}s", flush=True)
+    n1 = source_sizes(split)["s1"]
+    summary["per_s1_retrieved"] = summary["retrieved"] / n1
+    summary["per_s1_kept"] = summary["kept"] / n1
+    print(f"  candidates per S1 entity: {summary['per_s1_retrieved']:.1f} retrieved -> {summary['per_s1_kept']:.1f} after pruning")
+    return summary
 
 
 # --------------------------------------------------------------------------------------

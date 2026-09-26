@@ -86,6 +86,14 @@ TOPK = 15          # neighbours per S2/S3 record from the combined retrieval vec
 RETRIEVAL_WEIGHTS = {"name": 0.25, "phon": 0.25, "addr": 0.25, "addrp": 0.25}
 MIN_SIM = 0.05     # drop neighbours below this cosine (pure noise)
 TIE_EPS = 0.02     # rivals within this retrieval score of a record's best count as near-ties
+
+# Candidate pruning (cascade stage 2b). A small LightGBM on retrieval-stage features only scores
+# every retrieved pair; pairs with q < PRUNE_Q are dropped before the (expensive) full matcher.
+# The survivors ARE candidate_pairs.tsv. Measured on the full India block: 70.4 -> 7.5 candidates
+# per S1 entity at PRUNE_Q=0.003 for -0.0002 F0.5 (0.001: 9.3/S1, -0.0001; 0.01: 6.0/S1, -0.0005).
+# Set BER_PRUNE_Q=0 to disable pruning.
+PRUNE_Q = float(os.environ.get("BER_PRUNE_Q", 0.003))
+PRUNER_TRAIN_PCT = 6.0   # % of S1 entities (taken from the train role) whose pairs train the pruner
 # N-grams/tokens present in more than this many S1 records are dropped from the
 # retrieval index. They carry almost no identity signal ("llc", " st", "private")
 # and dominate sparse-matmul cost.
@@ -101,7 +109,7 @@ VALID_PCT = float(os.environ.get("BER_VALID_PCT", 4.0))   # % held out: half ear
 # training table ~4x (measured on the full India block: F0.5 -0.0009), which pays for training
 # on ~4x more entities (+0.002 F0.5 per doubling). Validation roles always keep every pair.
 EASY_REL = 0.8
-EASY_NEG_KEEP = 0.10
+EASY_NEG_KEEP = 0.10 if not PRUNE_Q else 1.0   # pruning already removes most easy negatives
 
 
 def train_valid_pct() -> tuple[float, float]:

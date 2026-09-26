@@ -9,13 +9,14 @@ The whole pipeline runs on the **full dataset on an AWS free-tier-class instance
 ## Pipeline
 
 ```
-raw TSVs (S3) ─► 00 clean ─► 01 EDA ─► 02 block + TF-IDF top-K ─► 03 features ─► 04 LightGBM + threshold ─► 05 test inference
+raw TSVs (S3) ─► 00 clean ─► 01 EDA ─► 02 block + TF-IDF top-K ─► learned pruner ─► 03 features ─► 04 LightGBM + threshold ─► 05 test inference
 ```
 
 | stage | method | checkpoint (local EBS; small artifacts also on S3) |
 |---|---|---|
 | 00 preprocessing | streamed; ASCII transliteration (anyascii), legal-form canonicalisation, alias (fka/dba) split, address normalisation (state removal, abbreviations, leading zeros, PO boxes), **phonetic consonant skeletons** of name and address | `clean/{split}_{s1,s2,s3}.parquet` |
 | 02 candidates | hard block on `country`; inside a block, sparse TF-IDF top-15 from each S2/S3 record into S1 on one vector = name char-3grams ⊕ phonetic-name char-3grams ⊕ address word 1-2grams ⊕ phonetic-address word 1-2grams (equal weights). Only one block's S1 index in memory; competition statistics accumulated while streaming | `candidates/{split}/{country}.parquet`, `candidates/{split}_stats.npz` |
+| 02b pruning | cascade stage: a small LightGBM on retrieval-stage signals only (score + name/address parts, rank, competition, near-ties, name/address frequency) drops retrieved pairs with q < `PRUNE_Q` (0.003). The survivors are the final candidate set = `candidate_pairs.tsv` = the only pairs the matcher scores. Full India block: 70.4 → 7.5 candidates per S1 for −0.0002 F0.5; ~8× less feature/scoring time | `pruned/{split}/{country}.parquet`, `model/pruner.txt` |
 | 03 features | ~70 country-agnostic features: rapidfuzz name / phonetic / address similarities, TF-IDF cosines, numeric-token agreement, legal form, retrieval score split into name / address parts, **competition** (rank, relative score, margin to the best rival — per record and per S1), near-tie counts, **ambiguity** (how many S1 share this exact name / address) | `features/train/*.parquet` |
 | 04 model | LightGBM on an entity-disjoint subsample: 30% of S1 entities train (all positives + hard negatives + a weighted 10% sample of easy negatives), 2% valid-A (early stopping + threshold), 2% valid-B (untouched report, every pair kept) | `model/lgbm.txt`, `model/meta.json` |
 | 05 inference | same functions on test; ~150M pairs featurised and scored in a stream (only probabilities stored); threshold | `output/matching_results.tsv`, `output/candidate_pairs.tsv` |

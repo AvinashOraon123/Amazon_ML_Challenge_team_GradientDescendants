@@ -45,7 +45,13 @@ full data on a free-tier instance.
 - **Blocking keys used:** `country` (hard block), then TF-IDF cosine top-15 inside the block on a
   combined vector: name char 3-grams ⊕ phonetic-name char 3-grams ⊕ address word 1–2-grams ⊕
   phonetic-address word 1–2-grams (equal weights; n-grams in > 20k S1 records dropped).
-- **Candidate pairs generated:** [fill in from 05: ~15 per S2/S3 record]
+- **Two-stage candidate generation:** (1) retrieval of the top-15 S1 per S2/S3 record (~70–87 per S1),
+  then (2) a **learned pruner** — a small LightGBM that sees only retrieval-stage signals (retrieval
+  score split into name / address parts, rank, competition against the record's and the S1's
+  other candidates, near-ties, name/address frequency) — keeps pairs with q ≥ 0.003. The survivors
+  are exactly what the final matcher scores and what `candidate_pairs.tsv` contains.
+- **Candidate pairs generated:** [fill in from 05] — on the full India validation block: 7.5 per S1
+  entity (from 70.4), candidate recall 97.4% (from 97.5%), final F0.5 change −0.0002.
 - **How we ensured true matches were not lost:** retrieval from the S2/S3 side; phonetic parts
   (+0.8 pt recall@10 on the full India block); K chosen from the recall-vs-K curve; blocking and
   candidate recall reported in notebook 02 ([fill in]%).

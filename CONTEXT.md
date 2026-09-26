@@ -170,6 +170,28 @@ many S1s; 37% have the true S1 at retrieval rank ≥ 2.
 11. Local laptop with ~8 GB is slower than the EC2 instance for retrieval (swapping); Claude Code's background jobs get auto-killed under memory pressure unless started with `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1`.
 12. Competition stats are **global-index** arrays — index them with `s1_idx` / `r_idx`, not block-local positions (this bug cost ~0.003 early on).
 
+## 8b. Organiser update — smaller candidate sets rank higher (NEW)
+The organisers announced that `candidate_pairs.tsv` and its code are reviewed for the final ranking
+and that **a smaller candidate set per S1 entity ranks higher**. `candidate_pairs.tsv` must be the
+exact set the model runs inference on (the last filtering stage).
+
+Our answer (branch `candidate-pruning`, not yet on the EC2 run that produced 0.9740):
+**cascade with a learned pruner** — retrieval top-15 → small LightGBM on retrieval-stage signals
+only (`features.retrieval_features`) → keep q ≥ `PRUNE_Q` → full matcher on the survivors.
+
+Full-scale India measurement (candidates per S1 / candidate recall / final valid-B F0.5):
+| stage | cand/S1 | recall | F0.5 |
+|---|---|---|---|
+| retrieval top-15 (current submission) | 70.4 | 0.9753 | 0.96983 |
+| rank ≤ 2 rule | 9.1 | 0.9547 | 0.96634 |
+| rel ≥ 0.8 rule | 10.9 | 0.9703 | 0.96850 |
+| **learned pruner q ≥ 0.001** | **9.3** | 0.9745 | **0.96976** |
+| **learned pruner q ≥ 0.003 (default)** | **7.5** | 0.9736 | **0.96966** |
+| learned pruner q ≥ 0.01 | 6.0 | 0.9709 | 0.96937 |
+Side effect: features/scoring only run on survivors → test scoring ~20 min instead of ~2.5 h.
+Code: `pipeline.train_pruner`, `pipeline.run_prune`, `candidate_files(split, pruned=...)`;
+notebooks 02 (section 4) and 05 (section 2b). Tune with `BER_PRUNE_Q` (0 disables).
+
 ## 9. Team plan (4 people, free tier; 16 GB laptop available)
 Shared rules: branch per person, PR only if **valid-B > 0.9740**, same `entity_roles` everywhere,
 exchange only small per-pair outputs keyed by `(r_idx, s1_idx)`, final zip must reproduce from `src/`.

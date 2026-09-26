@@ -77,19 +77,12 @@ def _take(df: pd.DataFrame, col: str, idx: np.ndarray) -> list:
     return df[col].iloc[idx].tolist()
 
 
-def pair_features(i1: np.ndarray, ir: np.ndarray, g1: np.ndarray, gr: np.ndarray, ret: np.ndarray,
-                  ret_nm: np.ndarray, rk: np.ndarray, s1: pd.DataFrame, r: pd.DataFrame, idf: dict,
-                  stats: dict, n_jobs: int = 2) -> pd.DataFrame:
-    """Feature frame for aligned arrays of pairs.
-
-    i1 / ir : positions of the pair's records in the block tables `s1` / `r` (RECORD_COLS)
-    g1 / gr : global s1_idx / r_idx of the pair (index the split-level `stats` arrays)
-    ret, ret_nm : combined retrieval cosine and its name contribution (address = ret - ret_nm)
-    idf     : {"name": idf vector, "addr": idf vector} (split-level, from the candidate stage)
-    stats   : competition / ambiguity statistics from the candidate stage
-    """
+def retrieval_features(g1: np.ndarray, gr: np.ndarray, ret: np.ndarray, ret_nm: np.ndarray,
+                       rk: np.ndarray, stats: dict) -> dict:
+    """Cheap features available right after retrieval (no string comparisons): retrieval score and
+    its name / address parts, rank, competition per record and per S1, near-ties, ambiguity.
+    Used by the candidate pruner and as the first block of the full matcher's features."""
     f = {}
-    # ---------------- retrieval + competition ----------------
     ret_ad = (ret - ret_nm).astype(FLOAT)
     f["ret"], f["ret_nm"], f["ret_ad"] = ret.astype(FLOAT), ret_nm.astype(FLOAT), ret_ad
     f["rk"] = rk.astype(np.int16)
@@ -107,6 +100,21 @@ def pair_features(i1: np.ndarray, ir: np.ndarray, g1: np.ndarray, gr: np.ndarray
     f["freq_r_name"] = stats["r_nfreq"][gr]
     f["freq_s1_addr"] = stats["s1_afreq"][g1]
     f["freq_r_addr"] = stats["r_afreq"][gr]
+    return f
+
+
+def pair_features(i1: np.ndarray, ir: np.ndarray, g1: np.ndarray, gr: np.ndarray, ret: np.ndarray,
+                  ret_nm: np.ndarray, rk: np.ndarray, s1: pd.DataFrame, r: pd.DataFrame, idf: dict,
+                  stats: dict, n_jobs: int = 2) -> pd.DataFrame:
+    """Feature frame for aligned arrays of pairs.
+
+    i1 / ir : positions of the pair's records in the block tables `s1` / `r` (RECORD_COLS)
+    g1 / gr : global s1_idx / r_idx of the pair (index the split-level `stats` arrays)
+    ret, ret_nm : combined retrieval cosine and its name contribution (address = ret - ret_nm)
+    idf     : {"name": idf vector, "addr": idf vector} (split-level, from the candidate stage)
+    stats   : competition / ambiguity statistics from the candidate stage
+    """
+    f = retrieval_features(g1, gr, ret, ret_nm, rk, stats)
 
     # ---------------- names ----------------
     na, nb = _take(s1, "name_core", i1), _take(r, "name_core", ir)

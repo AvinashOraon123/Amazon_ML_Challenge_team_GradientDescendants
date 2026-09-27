@@ -4,10 +4,101 @@ Hand-over document for the team (GradientDescendants). It summarises everything 
 built, measured and learned so far, so anyone can continue in their own workspace.
 
 - Repo: https://github.com/AvinashOraon123/Amazon_ML_Challenge_team_GradientDescendants (private)
+- **Latest (2026-09-27): best validation F0.5 0.9880, leaderboard 0.9821, from `solution_v3/`; see section 0.**
 - Status at time of writing (2026-09-26 ~08:00 UTC):
   - Full-data train + validation **done**. Held-out macro F0.5 = **0.9740** (target 0.985).
   - Test inference (notebook 05) **running** on Avinash's free-tier EC2, ETA ~16:00–16:30 UTC.
     It writes a validated `output/matching_results.tsv` + `output/candidate_pairs.tsv`.
+
+---
+
+## 0. Update 2026-09-27: new best (validation 0.9880, leaderboard 0.9821) from `solution_v3/`
+
+> Read this section first. Sections 1-10 below describe the notebook pipeline as of 2026-09-26
+> (validation 0.9740) and are kept unchanged as history; the data facts in section 2 still hold.
+
+### Where we are
+
+| | Notebook pipeline (sections 3-10) | **Kaggle GPU pipeline `solution_v3/` (submitted)** |
+|---|---|---|
+| Held-out macro F0.5 | 0.9740 (valid-B) | **0.9880** (1.1M held-out S1 entities; 0.9880 on a fixed 10% subset too) |
+| Public leaderboard | – | **0.9821** (0.982127) |
+| Candidates per S1 (test) | 70.4 (7.5 with the pruner branch) | **8.7** |
+| True pairs kept by candidates | 97.5% (India) | **99.0%** |
+| Singleton F0.5 | 0.9655 (accuracy) | 0.9852 |
+
+- The submitted files are the v3 outputs: `matching_results.tsv` (98,717 empty rows, 5.85M matches) and
+  `candidate_pairs.tsv` (15.1M pairs). Both passed `validate_submission.py --check-ids`.
+- The final zip `Gradient_Descendants_submission.zip` (output/, code/business_entity_resolution/,
+  filled Documentation_template.md) was built from `solution_v3/`; it is kept outside the repo because
+  of its size (128 MB).
+- Docs: `solution_v3/README.md` (how to run), `solution_v3/METHODOLOGY.md` (final write-up),
+  `solution_v3/EXPERIMENTS.md` (every approach tried, with scores), `solution_v3/submission_history/`
+  (v1, v2, v3 metrics; v2 methodology).
+
+### How `solution_v3` differs from the notebook pipeline
+
+| Stage | Notebook pipeline | `solution_v3` |
+|---|---|---|
+| Cleaning | `cleaning.py` rules + phonetic skeletons | similar rules (`normalize.py`) + cleaned copies for the matcher (filler words, phone numbers, PO boxes, URLs, "ICTY/CDP" junk removed), legal-form sets, 12 record-level **noise markers** |
+| Blocking | sparse TF-IDF top-15 per S2/S3 record (+ learned pruner branch) | **hashed character n-gram bi-encoder** trained from scratch (contrastive, mined hard negatives) with joint / address / name embeddings; exact GPU top-k per country; policy: joint top-5, address top-2 (cos > 0.8), name top-5 only for address-less records, cap 15 candidates per S1 per view |
+| Train / validation split | 30% train entities, valid-A 2%, valid-B 2% | **50% of S1 entities held out**: the encoder trains on the other half, the matcher trains 5-fold on candidates of the held-out half (entities the encoder never saw) |
+| Matcher | LightGBM, ~67 features | **XGBoost on GPU** (LightGBM on CPU gives the same score), ~150 features incl. name frequency, competition vs the record's other candidates, token accounting, house-number distance, noise markers; stage-2 stacker |
+| Decision | one threshold | each record keeps its best S1, then per-S1 expected-F0.5 prefix (empty when P(no match) wins) |
+| Compute | free-tier EC2 CPU | free Kaggle T4 via the Kaggle API; about 3.5 h end to end, resumable |
+
+### How the score got from 0.9856 to 0.9880 (details in `solution_v3/EXPERIMENTS.md`)
+
+1. **v1 (0.9856)**: bi-encoder + multi-view blocking + LightGBM. Error analysis: 24,840 missed pairs vs
+   3,436 wrong merges; 61% of misses were address-less records.
+2. **v2 (0.9860)**: name-frequency features (an address-less record whose exact name belongs to one S1
+   is that S1's in 97.7% of cases), competition features, name-view search for address-less records;
+   candidates 10.6 -> 8.1 per S1.
+3. **Full-scale local experiments** on the v2 feature table: cleaned text + legal form + noise markers
+   **+0.0016**; learning curve **+0.0009 per doubling** of matcher training rows.
+4. **v3 (0.9880)**: those features + the 50% entity holdout (5x more matcher data) + XGBoost on GPU.
+
+Confirms the notebook team's finding in section 5: more data helps (~+0.001 to +0.002 per doubling),
+bigger trees do not.
+
+### What did not help (full scale, exact metric)
+
+| Idea | Effect |
+|---|---|
+| Bigger / depth-wise trees, averages of up to 4 GBDTs | at most +0.00015 |
+| Entity-level "has any match" gate for singletons | +0.00001 |
+| Specialist model for S1 entities with one strong candidate | +0.00014 |
+| Assignment features from an entity's other records per source | +0.0002 |
+| MLP blended with the GBDT | never won the blend |
+
+### Limits we measured
+
+- **Realistic ceiling about 0.994**: a perfect matcher still loses the 0.95% of true pairs blocking misses
+  and ~7.2K address-less records whose name is shared by several S1 (e.g. six "Laex Inc").
+- **Singletons**: 89.5% of singleton false matches are decoy records that are near-exact noisy copies of
+  the singleton (same address, typo-level name change); the text cannot separate them.
+- **Leaderboard gap (0.9880 -> 0.9821)**: not measurable without test labels; the likely causes are
+  France (15% of test, generic repeated names like "Ecole", "Lycée", "Amicale"; about 0.95 if US/India
+  hold their validation level) and a denser test set (5.75 S2/S3 records per S1 vs 4.7 in train).
+
+### Infrastructure added
+
+- Kaggle account `kshirodkalet`: private datasets `ber-challenge-data` (lossless parquet copy of the
+  TSVs) and `ber-code` (the `solution_v3/src` package); GPU jobs `ber-train-encoder`, `ber-final`,
+  `ber-final-resume` (scripts in `solution_v3/src/kaggle/`).
+- Kaggle discards all output of a job that ends in an error, so the job scripts never raise and write
+  `PIPELINE_STATUS.txt`; a resume job reuses the saved encoder, candidate rule and searches.
+- Gotchas hit: GPU memory held by PyTorch's cache starves XGBoost (clear it first); a 9.5M x 130 feature
+  matrix needs record-aligned chunking on 29 GB RAM; the job script must be compile-checked before
+  pushing.
+
+### Suggested next steps
+
+1. Validate with extra decoys so each S1 faces ~5.75 records (test density) and re-tune the decision rule.
+2. Treat generic French institution words (école, lycée, association, comité, centre, amicale, société)
+   as low-weight filler for France.
+3. Save test probabilities so decision changes can be tried in minutes instead of rerunning the test side.
+4. Try combining the notebook team's record-level ranker / pruner ideas with the `solution_v3` features.
 
 ---
 

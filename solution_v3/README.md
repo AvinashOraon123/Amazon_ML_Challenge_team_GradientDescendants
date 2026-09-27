@@ -4,7 +4,8 @@
 > 0.9821), kept self-contained in `solution_v3/` so it does not touch the notebook pipeline at the repo
 > root. Run the commands below from `solution_v3/src/` and point `--data` at your copy of the challenge
 > `dataset/` folder (the data itself is not in the repository). The methodology write-up is
-> `solution_v3/METHODOLOGY.md`; `experiments/` holds the full-scale analysis scripts.
+> `solution_v3/METHODOLOGY.md`; `experiments/` holds the full-scale analysis scripts, and
+> `solution_v3/EXPERIMENTS.md` lists every approach tried and how the score reached 0.9880.
 
 Everything runs from one command. Stages save their outputs and are skipped when re-run, so an
 interrupted run resumes where it stopped (the encoder also resumes from its last finished epoch).

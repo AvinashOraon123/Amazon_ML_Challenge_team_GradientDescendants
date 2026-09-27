@@ -73,3 +73,14 @@ notebook to recompute). Dev-sample runs use separate `checkpoints_sample<frac>/`
 
 All dependencies are open source (MIT / BSD / Apache-2.0 / ISC). The matching model is a
 LightGBM gradient-boosted tree ensemble trained from scratch (no pretrained weights).
+
+## Kaggle GPU pipeline (`solution_v3/`)
+
+A second, self-contained pipeline in `solution_v3/` produced the submitted v3 files: validation
+F0.5 **0.9880**, public leaderboard **0.9821**, 8.7 test candidates per Source-1 entity. It uses a
+character n-gram bi-encoder for blocking and an XGBoost matcher, run on free Kaggle GPUs.
+
+- [`solution_v3/EXPERIMENTS.md`](solution_v3/EXPERIMENTS.md): every approach tried, with scores, and how
+  the final score was reached
+- [`solution_v3/METHODOLOGY.md`](solution_v3/METHODOLOGY.md): the methodology write-up
+- [`solution_v3/README.md`](solution_v3/README.md): how to run it

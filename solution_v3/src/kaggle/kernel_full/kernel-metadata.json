@@ -1,0 +1,19 @@
+{
+  "id": "kshirodkalet/ber-full-pipeline",
+  "title": "ber-full-pipeline",
+  "code_file": "run.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [
+    "kshirodkalet/ber-challenge-data",
+    "kshirodkalet/ber-code"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [
+    "kshirodkalet/ber-train-encoder",
+    "kshirodkalet/ber-analyze"
+  ]
+}

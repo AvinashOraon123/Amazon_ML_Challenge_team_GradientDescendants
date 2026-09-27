@@ -1,0 +1,14 @@
+{
+  "id": "kshirodkalet/ber-train-encoder",
+  "title": "ber-train-encoder",
+  "code_file": "run.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "machine_shape": "NvidiaTeslaT4",
+  "dataset_sources": ["kshirodkalet/ber-challenge-data", "kshirodkalet/ber-code"],
+  "competition_sources": [],
+  "kernel_sources": []
+}

@@ -6,6 +6,7 @@
 > `dataset/` folder (the data itself is not in the repository). The methodology write-up is
 > `solution_v3/METHODOLOGY.md`; `experiments/` holds the full-scale analysis scripts, and
 > `solution_v3/EXPERIMENTS.md` lists every approach tried and how the score reached 0.9880.
+> Earlier submissions (v1, v2 with its methodology document) are in `solution_v3/submission_history/`.
 
 Everything runs from one command. Stages save their outputs and are skipped when re-run, so an
 interrupted run resumes where it stopped (the encoder also resumes from its last finished epoch).

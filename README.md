@@ -56,7 +56,7 @@ Approaches are ordered by F0.5, best first.
 |:-:|---|:-:|:-:|:-:|---|
 | 🥇 **1** | **Bi-encoder blocking + XGBoost matcher** (`solution_v3/`) | **0.9880** | **0.9821** | **8.7** (test) | free Kaggle T4 GPU, ~3.5 h |
 | 🥈 2 | TF-IDF retrieval + LightGBM (notebooks, `src/`) | 0.9740 | **0.977** | 70.4 | free-tier EC2 CPU, 2 vCPU / 8 GB |
-| 🥉 3 | TF-IDF retrieval + learned candidate pruner + LightGBM | 0.9662 ¹ | **0.9880** | 7.5 | free-tier EC2 CPU |
+| 🥉 3 | TF-IDF retrieval + learned candidate pruner + LightGBM | **0.9662** | **0.966** | 7.5 | free-tier EC2 CPU |
 
 ¹ Measured on the full-scale India block only. On the same block, Approach 2 without the pruner scores
 0.9698, so the pruner cuts candidates 70.4 → 7.5 per S1 for a loss of only 0.0002 F0.5.

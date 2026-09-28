@@ -2,7 +2,7 @@
 
 # Business Entity Resolution
 
-**Amazon ML Challenge 2026 · Team GradientDescendants**
+**Amazon ML Challenge 2026 · Team Gradient_Descendants**
 
 Match every Source-1 business to all Source-2 / Source-3 records of the same real-world entity.
 
